@@ -15,4 +15,3 @@ server: $(OBJ)
 # Clean up object files and the server executable
 clean:
 	rm -f $(OBJ) server
-

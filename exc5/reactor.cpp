@@ -1,9 +1,14 @@
 #include "reactor.hpp"
 #include <iostream>
 #include <thread>
+#include <vector>
+#include <sys/socket.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 /**
- * @brief The main loop of the reactor, which waits for events and dispatches them to the appropriate handlers.
+ * @brief Main loop of the reactor and dispatches events to handlers
  * @param arg Pointer to the Reactor instance.
  * @return nullptr
  */
@@ -27,12 +32,43 @@ void* reactorLoop(void* arg) {
         }
 
         // check which fds are ready and call their handlers
+        std::vector<int> fds_to_remove;
         for (auto const& kv : reactor->handlers) {
             int fd = kv.first;// get the fd. kv is a pair (fd, func)
             reactorFunc func = kv.second;
 
             if (FD_ISSET(fd, &readfds)) {// if the fd is ready
+                // Test if the fd is still valid
+                int flags = fcntl(fd, F_GETFL);
+                if (flags == -1) {
+                    // fd is invalid, mark for removal
+                    fds_to_remove.push_back(fd);
+                    continue;
+                }
+                
                 func(fd); // call the user-defined function
+                
+                // After calling the function, check if fd is still valid
+                flags = fcntl(fd, F_GETFL);
+                if (flags == -1) {
+                    // fd was closed by the handler, mark for removal
+                    fds_to_remove.push_back(fd);
+                }
+            }
+        }
+        
+        // Remove closed fds outside of the iteration to avoid modifying the map while iterating
+        for (int fd : fds_to_remove) {
+            FD_CLR(fd, &reactor->master_set);
+            reactor->handlers.erase(fd);
+            // Update max_fd if necessary
+            if (fd == reactor->max_fd) {
+                reactor->max_fd = 0;
+                for (auto const& kv : reactor->handlers) {
+                    if (kv.first > reactor->max_fd) {// find the new max_fd
+                        reactor->max_fd = kv.first;// update max_fd
+                    }
+                }
             }
         }
     }
@@ -65,6 +101,8 @@ void* startReactor() {
 int addFdToReactor(void* r, int fd, reactorFunc func) {
     Reactor* reactor = (Reactor*)r;//cast the void pointer to Reactor pointer
     FD_SET(fd, &reactor->master_set);// add fd to the master set
+
+
     reactor->handlers[fd] = func;// map the fd to its handler function
     if (fd > reactor->max_fd) reactor->max_fd = fd;// update max_fd if necessary
     return 0;
@@ -79,7 +117,19 @@ int addFdToReactor(void* r, int fd, reactorFunc func) {
 int removeFdFromReactor(void* r, int fd) {
     Reactor* reactor = (Reactor*)r;//cast the void pointer to Reactor pointer
     FD_CLR(fd, &reactor->master_set);// remove fd from the master set
+
     reactor->handlers.erase(fd);// remove the handler mapping
+    
+    // If we removed the max_fd, find the new max
+    if (fd == reactor->max_fd) {
+        reactor->max_fd = 0;
+        for (auto const& kv : reactor->handlers) {
+            if (kv.first > reactor->max_fd) {
+                reactor->max_fd = kv.first;
+            }
+        }
+    }
+    
     return 0;
 }
 

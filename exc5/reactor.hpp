@@ -3,10 +3,10 @@
 
 #include <functional>
 #include <sys/select.h>
-#include <unistd.h>
 #include <map>
 
-typedef void *(* reactorFunc) (int fd);
+//typedef void *(* reactorFunc) (int fd);
+typedef std::function<void(int)> reactorFunc;
 
 struct Reactor {
     fd_set master_set; // master file descriptor list
@@ -26,5 +26,6 @@ int removeFdFromReactor(void * reactor, int fd);
 
 // stops reactor
 int stopReactor(void * reactor);
+
 
 #endif // REACTOR_HPP
