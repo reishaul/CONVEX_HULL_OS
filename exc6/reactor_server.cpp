@@ -10,7 +10,7 @@
 #include <sstream>
 
 #include "../exc3/actions.hpp" // Include the actions header file
-#include "../exc5/reactor.hpp"
+#include "../exc5/reactor.hpp"// Include the reactor header file
 
 
 // Constants
@@ -18,7 +18,7 @@
 #define BACKLOG 12//how many pending connections the queue will hold
 #define BUFFER_SIZE 1024// size of the buffer for reading and writing
 
-void* globalReactor = nullptr;
+void* _reactor = nullptr;// reactor instance
 
 using namespace std;
 
@@ -89,8 +89,8 @@ bool handle_command(int client_fd, const string &cmd) {
     // Commands that modify or calculate the graph - check if graph is busy
     if(command == "Newgraph" || command == "Newpoint" || command == "Removepoint" || command == "CH") {
         if(graph_in_use) {// If the graph is currently being modified or calculated
-            waiting_clients.push_back(client_fd);
-            send_to_client(client_fd, "Graph is currently being modified. Please wait...\n");
+            waiting_clients.push_back(client_fd);// add to waiting list
+            send_to_client(client_fd, "Graph is currently being modified Please wait...\n");
             return false;
         }
     }
@@ -101,7 +101,7 @@ bool handle_command(int client_fd, const string &cmd) {
             graph_in_use = true; // Mark the graph as in use
 
             client_states[client_fd].awaiting_points = true;// Expecting points next
-            client_states[client_fd].points_needed = n;//
+            client_states[client_fd].points_needed = n;//define how many points are needed
             initGraph();// Initialize empty graph
             send_to_client(client_fd, "send " + to_string(n) + " points\n");
         } 
@@ -194,13 +194,7 @@ bool handle_command(int client_fd, const string &cmd) {
         send_to_client(client_fd, "bye!\n");
         return true; // Connection closed
     }
-    //     close(client_fd);//close the socket
-    //     removeFdFromReactor(globalReactor, client_fd);// remove from the reactor's master set
 
-    //     waiting_clients.erase(remove(waiting_clients.begin(), waiting_clients.end(), client_fd), waiting_clients.end());
-    //     client_states.erase(client_fd);// Remove client state
-    //     return true; // Connection closed
-    // }
 
     else {
         send_to_client(client_fd, "Error: command isn't valid\n");
@@ -219,7 +213,7 @@ void* clientHandler(int client_fd) {
 
     if (byte_count <= 0) {// if recv failed or connection closed
         cout << "Socket " << client_fd << " disconnected\n";
-        close(client_fd);
+        close(client_fd);//close the socket for cleanup
         client_states.erase(client_fd);// Remove client state
         return nullptr;
     }
@@ -236,7 +230,7 @@ void* clientHandler(int client_fd) {
     // If the command indicated we should close, just close the socket
     // The reactor will detect this on the next iteration
     if (should_close) {
-        close(client_fd);
+        close(client_fd);//close the socket for cleanup
         client_states.erase(client_fd);
     }
     
@@ -263,7 +257,7 @@ void* listenerHandler(int listener_fd) {
     client_states[newfd] = ClientState(); // Initialize client state
     send_to_client(newfd, "Welcome to the Convex Hull Server! (quit to end)\n");
 
-    addFdToReactor(globalReactor, newfd, clientHandler);// add the new client socket to the reactor
+    addFdToReactor(_reactor, newfd, clientHandler);// add the new client socket to the reactor
     return nullptr;
 }
 
@@ -292,8 +286,8 @@ int main() {
     }
     cout << "Server listening on port " << PORT << "...\n";
 
-    globalReactor=startReactor();//start the reactor that runs with select in a separate thread
-    addFdToReactor(globalReactor, listener, listenerHandler);// Add the listener socket to the reactor
+    _reactor=startReactor();//start the reactor that runs with select in a separate thread
+    addFdToReactor(_reactor, listener, listenerHandler);// Add the listener socket to the reactor
 
     while(true){
         sleep(1);// Keep the main thread alive
