@@ -28,4 +28,4 @@ int removeFdFromReactor(void * reactor, int fd);
 int stopReactor(void * reactor);
 
 
-#endif // REACTOR_HPP
+#endif 

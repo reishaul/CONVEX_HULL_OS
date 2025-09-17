@@ -1,19 +1,30 @@
-
 # Compile with g++ and link with pthreads
-all: example
+CXX = g++
+CXXFLAGS = -Wall -g -pthread
 
-# Build the example executable
+all: example example_proactor
+
+# Build the reactor example executable
 example: reactor.o example.o
-	g++ -pthread reactor.o example.o -o example
+	$(CXX) $(CXXFLAGS) reactor.o example.o -o example
 
-#/Compile source files into object files
+# Build the proactor example executable
+example_proactor: proactor.o example_proactor.o
+	$(CXX) $(CXXFLAGS) proactor.o example_proactor.o -o example_proactor
+
+# Compile source files into object files
 reactor.o: reactor.cpp reactor.hpp
-	g++ -c reactor.cpp
+	$(CXX) $(CXXFLAGS) -c reactor.cpp
 
-#Compile source files into object files
 example.o: example.cpp reactor.hpp
-	g++ -c example.cpp
+	$(CXX) $(CXXFLAGS) -c example.cpp
 
-# Clean up object files and the executable
+proactor.o: proactor.cpp proactor.hpp
+	$(CXX) $(CXXFLAGS) -c proactor.cpp
+
+example_proactor.o: example_proactor.cpp proactor.hpp
+	$(CXX) $(CXXFLAGS) -c example_proactor.cpp
+
+# Clean up object files and the executables
 clean:
-	rm -f *.o example
+	rm -f *.o example example_proactor

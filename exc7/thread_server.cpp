@@ -16,7 +16,7 @@
 #include <netdb.h>
 
 #include "../exc3/actions.hpp" // Include the actions header file
-#include <map>
+#include <map>//include map for client states
 #include <sstream>
 
 
@@ -27,7 +27,7 @@
 
 using namespace std;
 
-std::mutex graph_mutex;
+std::mutex graph_mutex;// Mutex to protect access to the graph
 
 /*
 @brief Sends a message to the specified client socket
@@ -51,11 +51,13 @@ void send_to_client(int client_fd, const string &msg) {
 
 
 
-// Thread function: handles a single client
+// Thread function handles a single client
 void client_thread_func(int client_fd) {
-    char buffer[BUFFER_SIZE];
 
-    // Local client state (no global tracking necessary)
+    cout<<"new client on socket "<<client_fd<<" thread id: "<<this_thread::get_id()<<"\n";//print thread id and socket id
+    char buffer[BUFFER_SIZE];// buffer for reading and writing
+
+    // Local client state (no global tracking necessary because each client has its own thread)
     struct ClientStateLocal {
         bool awaiting_points = false;
         int points_needed = 0;
@@ -63,10 +65,10 @@ void client_thread_func(int client_fd) {
 
     send_to_client(client_fd, "Welcome to the Convex Hull Server! (quit to end)\n");
 
-    while (true) {
-        memset(buffer, 0, sizeof(buffer));
-        ssize_t byte_count = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-        if (byte_count <= 0) {
+    while (true) {//loop to handle client commands
+        memset(buffer, 0, sizeof(buffer));// clear the buffer
+        ssize_t byte_count = recv(client_fd, buffer, sizeof(buffer) - 1, 0);//store number of bytes read
+        if (byte_count <= 0) {// if recv failed or connection closed
             if (byte_count == 0) {
                 cout << "Socket " << client_fd << " disconnected\n";
             } else {
@@ -76,41 +78,38 @@ void client_thread_func(int client_fd) {
             return;
         }
 
-        string line(buffer);
-        // trim newline/cr
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+        string line(buffer);// Convert buffer to string
+        
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();// trim newline/cr (lefties in the line)
 
         if (line.empty()) continue;
 
         cout << "Received from socket " << client_fd << ": " << line << "\n";
 
-        if(state.awaiting_points) {
+        if(state.awaiting_points) {// If waiting for points after Newgraph
 
-            stringstream ss(line);
+            stringstream ss(line);// Create a stringstream from the command to parse the point call it ss
             double x, y;
-            if (ss >> x >> y) {
+            if (ss >> x >> y) {//if successfully parsed two doubles
                 {
-                    std::lock_guard<std::mutex> lock(graph_mutex);
+                    std::lock_guard<std::mutex> lock(graph_mutex);// Lock the graph for exclusive access
                     newPoint(x, y);
                 }
-                state.points_needed--;
-                if (state.points_needed == 0) {
-                    state.awaiting_points = false;
+                state.points_needed--;// Decrement the number of points still needed
+                if (state.points_needed == 0) {// If all points have been received
+                    state.awaiting_points = false;// define that we are no longer waiting for points
                     send_to_client(client_fd, "Graph created\n");
                 }
-                // else {
-                //     send_to_client(client_fd, "Point (" + to_string(x) + ", " + to_string(y) + ") added\n");
-                // }
             }
-            else{
+            else{// If parsing failed
                 send_to_client(client_fd, "Error: Invalid point format Use: x y\n");
             }
             continue;
 
         }
-        stringstream ss(line);
-        string command;
-        ss >> command;
+        stringstream ss(line);// Create a stringstream from the input line call it ss
+        string command;// Create a string to hold the command
+        ss >> command;// Extract the command from the stringstream
 
         if(command == "Newgraph") {
             int n;
@@ -128,20 +127,20 @@ void client_thread_func(int client_fd) {
             }
         }
         else if(command == "CH") {
-            // Compute convex hull and area while holding the graph mutex
-            std::lock_guard<std::mutex> lock(graph_mutex);
-            vector<Point> hull = grahamHull(points);
-            double area = polygonArea(hull);
+            //Compute convex hull and area while holding the graph mutex
+            std::lock_guard<std::mutex> lock(graph_mutex);// Lock the graph for exclusive access
+            vector<Point> hull = grahamHull(points);//vector of points that are in the convex hull
+            double area = polygonArea(hull);// calculate area of the convex hull
 
             stringstream response;
             response << "Convex Hull:\n";
-            for (auto &p : hull) {
+            for (auto &p : hull) {// iterate through points in the convex hull
                 response << "(" << p.x << ", " << p.y << ")\n";
             }
-            response.setf(ios::fixed);
-            response.precision(3);
+            response.setf(ios::fixed);// Fixed point notation
+            response.precision(3);// Set precision for area output 3 places after decimal
             response << "Area: " << area << "\n";
-            send_to_client(client_fd, response.str());
+            send_to_client(client_fd, response.str());// send response to client
         }
 
         else if(command == "Newpoint") {
@@ -153,17 +152,17 @@ void client_thread_func(int client_fd) {
                 stringstream cs(coords);// Create a new stringstream to parse the coordinates call it cs
                 double x, y; 
                 if(cs >> x >> y){
-                    lock_guard<mutex> lock(graph_mutex);
+                    lock_guard<mutex> lock(graph_mutex);// Lock the graph for exclusive access
                     newPoint(x, y);
-                    send_to_client(client_fd, "Point (" + to_string(x) + ", " + to_string(y) + ") added\n");
+                    send_to_client(client_fd, "Point (" + to_string(x) + ", " + to_string(y) + ") added\n");// send confirmation to client
                 }
-                else {
+                else {// If parsing failed
                     send_to_client(client_fd, "Error: Invalid point format Use: x,y\n");
                 }
 
             }
             else {
-                send_to_client(client_fd, "Error: No coordinates provided Use: Newpoint x,y\n");
+                send_to_client(client_fd, "Error: No coordinates provided Use: Newpoint x,y\n");// send error message to client
             }
         }
         else if(command == "Removepoint") {
@@ -178,7 +177,7 @@ void client_thread_func(int client_fd) {
                     removePoint(x, y);// Remove the point from the graph using the provided coordinates
                     send_to_client(client_fd, "Point (" + to_string(x) + ", " + to_string(y) + ") removed\n");
                 }
-                else {
+                else {// If parsing failed
                     send_to_client(client_fd, "Error: Invalid point format Use: x,y\n");
                 }
 
@@ -193,7 +192,7 @@ void client_thread_func(int client_fd) {
             close(client_fd);//close the socket
             return; // Exit the thread
         }
-        else{
+        else{// Invalid command
             send_to_client(client_fd, "Error: command isn't valid\n");
         }
     }
@@ -205,21 +204,19 @@ void client_thread_func(int client_fd) {
  * @param list Pointer to the master list of sockets (for removing on quit)
  * @return true if the connection should be closed, false otherwise
  */
-
-
 int main(int argc, char *argv[]) {
 
-    struct addrinfo hints, *ai, *p;// hints for getaddrinfo
-    int listen_fd;
+    struct addrinfo hints, *ai, *p;// hints for getaddrinfo that will point to the results
+    int listen_fd;// listening socket file descriptor
 
 
     memset(&hints, 0, sizeof hints);// zero out the hints structure
     hints.ai_family = AF_UNSPEC;// don't care IPv4 or IPv6
-    hints.ai_socktype = SOCK_STREAM;// TCP stream sockets
+    hints.ai_socktype = SOCK_STREAM;// tcp stream sockets
     hints.ai_flags = AI_PASSIVE;// fill in my IP for me
 
     if(getaddrinfo(NULL, PORT, &hints, &ai)!=0) {// get the address info
-        perror("getaddrinfo error");
+        perror("getaddrinfo error");// print error message
         return 1;
     }
     // loop through all the results and bind to the first we can
@@ -243,7 +240,7 @@ int main(int argc, char *argv[]) {
 
     if(p == NULL) {// if we got here, it means we didn't bind successfully
         fprintf(stderr, "server: failed to bind\n");
-        exit(1);
+        exit(1);//exit code 1
     }
 
     freeaddrinfo(ai); // all done with this structure
@@ -256,7 +253,7 @@ int main(int argc, char *argv[]) {
     cout<<"Server listening on port "<<PORT<<"...\n";
 
 
-    // main loop to accept and handle client connections
+    // main loop to accept and handle client connections 
     while (true) {
 
         struct sockaddr_storage remoteaddr; // client address
@@ -268,17 +265,17 @@ int main(int argc, char *argv[]) {
         }
         cout<<"new connection on socket "<<newfd<<"\n";
 
-        try{
+        try{// try to start a new thread for the client
             thread t(client_thread_func, newfd);// Start a new thread for the client and detach it
             t.detach();
         }
-        catch(...) {
+        catch(...) {// If thread creation failed we catch all exceptions
             perror("Thread creation failed");
             close(newfd);
         }
     }
 
-    close(listen_fd);
+    close(listen_fd);//close the listening socket (unreachable code in this example)
 
     return 0;
 }
