@@ -52,6 +52,10 @@ void send_to_client(int client_fd, const string &msg) {
 
 
 // Thread function handles a single client
+/*
+    * @brief Function to handle client commands in a separate thread and manage client state
+    * @param client_fd The file descriptor of the client socket
+    */
 void client_thread_func(int client_fd) {
 
     cout<<"new client on socket "<<client_fd<<" thread id: "<<this_thread::get_id()<<"\n";//print thread id and socket id
