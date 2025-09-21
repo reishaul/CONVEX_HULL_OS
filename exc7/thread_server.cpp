@@ -60,12 +60,10 @@ void client_thread_func(int client_fd) {
 
     cout<<"new client on socket "<<client_fd<<" thread id: "<<this_thread::get_id()<<"\n";//print thread id and socket id
     char buffer[BUFFER_SIZE];// buffer for reading and writing
-
-    // Local client state (no global tracking necessary because each client has its own thread)
-    struct ClientStateLocal {
-        bool awaiting_points = false;
-        int points_needed = 0;
-    } state;
+    
+    bool awaiting_points = false;//waiting for points after Newgraph
+    int points_needed = 0;//number of points still needed to complete the graph
+    
 
     send_to_client(client_fd, "Welcome to the Convex Hull Server! (quit to end)\n");
 
@@ -90,18 +88,19 @@ void client_thread_func(int client_fd) {
 
         cout << "Received from socket " << client_fd << ": " << line << "\n";
 
-        if(state.awaiting_points) {// If waiting for points after Newgraph
+        if(awaiting_points) {// If waiting for points after Newgraph (to lock the graph when adding points)
 
             stringstream ss(line);// Create a stringstream from the command to parse the point call it ss
             double x, y;
             if (ss >> x >> y) {//if successfully parsed two doubles
-                {
-                    std::lock_guard<std::mutex> lock(graph_mutex);// Lock the graph for exclusive access
-                    newPoint(x, y);
-                }
-                state.points_needed--;// Decrement the number of points still needed
-                if (state.points_needed == 0) {// If all points have been received
-                    state.awaiting_points = false;// define that we are no longer waiting for points
+
+                lock_guard<std::mutex> lock(graph_mutex);// Lock the graph for exclusive access
+                newPoint(x, y);
+                
+                points_needed--;// Decrement the number of points still needed
+
+                if (points_needed == 0) {// If all points have been received
+                    awaiting_points = false;// define that we are no longer waiting for points
                     send_to_client(client_fd, "Graph created\n");
                 }
             }
@@ -118,14 +117,38 @@ void client_thread_func(int client_fd) {
         if(command == "Newgraph") {
             int n;
             if(ss >> n && n > 0) {// If successfully parsed a positive integer
-                {
-                    std::lock_guard<std::mutex> lock(graph_mutex);
-                    initGraph();// Initialize empty graph
-                }
-                state.awaiting_points = true;// Expecting points next
-                state.points_needed = n;//define how many points are needed
+                
+                graph_mutex.lock();// Lock the graph for exclusive access
+              
+                initGraph();// Initialize empty graph
                 send_to_client(client_fd, "send " + to_string(n) + " points\n");
-            } 
+
+                int remaining = n;// points remaining to read
+                while (remaining > 0) {
+                    memset(buffer, 0, sizeof(buffer));
+                    ssize_t b = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+                    if (b <= 0) { 
+                        graph_mutex.unlock(); // Unlock on error!
+                        close(client_fd); 
+                        return; 
+                    }
+                    string pline(buffer);// convert buffer to string
+                    while (!pline.empty() && (pline.back() == '\n' || pline.back() == '\r')) pline.pop_back();
+                    stringstream pss(pline);// stringstream for parsing point call it pss
+                    double x, y;
+                    if (pss >> x >> y) {// if successfully parsed two doubles
+                        newPoint(x, y);  // No separate lock needed - we already have the mutex
+                        remaining--;// one less point to read
+                        //send_to_client(client_fd, "Point received\n");
+                    }
+                    else {// If parsing failed
+                        send_to_client(client_fd, "Error: Invalid point format Use: x y\n");
+                    }
+                } 
+                // Unlock only after ALL points are added
+                graph_mutex.unlock();
+                send_to_client(client_fd, "Graph created\n");
+            }
             else {
                 send_to_client(client_fd, "Invalid number of points\n");
             }
@@ -180,7 +203,7 @@ void client_thread_func(int client_fd) {
                     lock_guard<mutex> lock(graph_mutex);
                     removePoint(x, y);// Remove the point from the graph using the provided coordinates
                     send_to_client(client_fd, "Point (" + to_string(x) + ", " + to_string(y) + ") removed\n");
-                }
+                }//here the mutex is unlocked
                 else {// If parsing failed
                     send_to_client(client_fd, "Error: Invalid point format Use: x,y\n");
                 }
