@@ -54,29 +54,33 @@ void send_to_client(int client_fd, const string &msg) {
 void update_area(double area) {
     pthread_mutex_lock(&area_mutex);// lock area mutex
 
-    bool was_above_100 = area_at_least_100;
-    area_at_least_100 = (area >= 100.0);
+    bool was_at_least_100 = area_at_least_100;//variable to store previous state
+    area_at_least_100 = (area >= 100.0);//if area is at least 100
 
     current_area = area;
 
     area_changed = true;
-    if (area_at_least_100 != was_above_100) {
-        pthread_cond_broadcast(&area_condition);
+    if (area_at_least_100 != was_at_least_100) {// if state changed
+        pthread_cond_broadcast(&area_condition);// notify waiting threads
         
     }
-    pthread_mutex_unlock(&area_mutex);
+    pthread_mutex_unlock(&area_mutex);// unlock area mutex
 }
 
 
+/*
+* @brief Thread function to monitor area changes
+*and print messages when area crosses the 100 unit threshold
+*/
 void* area_state_thread(void*) {
-    pthread_mutex_lock(&area_mutex);
-    while (true) {
+    pthread_mutex_lock(&area_mutex);// lock area mutex
+    while (true) {// infinite loop
         while (!area_changed) {// wait for area change
-            pthread_cond_wait(&area_condition, &area_mutex);
+            pthread_cond_wait(&area_condition, &area_mutex);// wait for signal
         }
         area_changed = false;
 
-        if (area_at_least_100) {
+        if (area_at_least_100) { 
             cout << "At Least 100 units belongs to CH (Current area: " << current_area << ")" << endl;
         
         } 
@@ -84,7 +88,7 @@ void* area_state_thread(void*) {
             cout << "At Least 100 units no longer belongs to CH (Current area: " << current_area << ")" << endl;
         }
     }
-    pthread_mutex_unlock(&area_mutex);
+    pthread_mutex_unlock(&area_mutex);// unlock area mutex
     return nullptr;
 }
 
@@ -128,7 +132,7 @@ void *client_thread(int client_fd) {
         // Handle point input during graph creation
         if (awaiting_points) {// If waiting for points after Newgraph (to lock the graph when adding points)
             double x, y;
-            stringstream ss(line);
+            stringstream ss(line);// Create a stringstream from the command to parse the point call it ss
             if (ss >> x >> y) {
                 // Lock graph mutex for adding this specific point
                 graph_mutex.lock();
@@ -136,17 +140,17 @@ void *client_thread(int client_fd) {
                 points_needed--;// Decrement number of points still needed
                 
                 if (points_needed == 0) {
-                    awaiting_points = false;
-                    graph_being_created = false;
+                    awaiting_points = false;// all points received
+                    graph_being_created = false;// graph creation complete
                     
                     // Calculate initial CH area after graph creation
                     vector<Point> hull = grahamHull(points);
                     double area = polygonArea(hull);
                     update_area(area);// Update area state
                     
-                    graph_mutex.unlock();
+                    graph_mutex.unlock();// unlock graph mutex
                     // Unlock creation mutex - now other clients can access the completed graph
-                    graph_creation_mutex.unlock();
+                    graph_creation_mutex.unlock();// unlock creation mutex
                     
                     send_to_client(client_fd, "Graph created successfully\n");
                 } else {
@@ -167,18 +171,18 @@ void *client_thread(int client_fd) {
             int n;//store number of points
             if (ss >> n && n > 0) {
                 // Lock both mutexes for the entire graph creation process
-                graph_creation_mutex.lock();
-                graph_mutex.lock();
+                graph_creation_mutex.lock();// Lock creation mutex to block other clients
+                graph_mutex.lock();// Lock graph mutex to block other clients
                 
                 initGraph();// Initialize empty graph
                 graph_initialized = true;
                 graph_being_created = true;
                 
                 // Unlock graph_mutex but keep graph_creation_mutex locked during point collection
-                graph_mutex.unlock();
+                graph_mutex.unlock();// unlock graph mutex
                 
-                awaiting_points = true;
-                points_needed = n;
+                awaiting_points = true;// all points will be sent next
+                points_needed = n;//store how many points are needed
                 send_to_client(client_fd, ("send " + to_string(n) + " points\n").c_str());
             }
             else {
@@ -189,13 +193,13 @@ void *client_thread(int client_fd) {
 
             // Check if graph exists before adding points
             {
-                lock_guard<mutex> lock(graph_mutex);
-                if (!graph_initialized) {
+                lock_guard<mutex> lock(graph_mutex);// lock the mutex
+                if (!graph_initialized) {// Check if graph exists before adding points
                     send_to_client(client_fd, "Error: No graph exists. Create a graph first with 'Newgraph <n>'\n");
                     continue;
                 }
             }
-            string coords;
+            string coords;// string to hold coordinates
             if (ss >> coords) {
                 for (char &c : coords) if (c == ',') c = ' ';// replace commas with space
                 stringstream cs(coords);// stringstream for parsing point call it cs
@@ -208,7 +212,7 @@ void *client_thread(int client_fd) {
 
                     vector<Point> hull = grahamHull(points);// compute convex hull
                     double area = polygonArea(hull);// compute area of the hull
-                    update_area(area);
+                    update_area(area);// update area state
                 }//here the mutex is unlocked
                 else {
                     send_to_client(client_fd, "Error: Invalid point format Use: Newpoint x,y\n");
@@ -221,8 +225,8 @@ void *client_thread(int client_fd) {
 
             // Check if graph exists before removing points
             {
-                lock_guard<mutex> lock(graph_mutex);
-                if (!graph_initialized) {
+                lock_guard<mutex> lock(graph_mutex);   // lock the mutex
+                if (!graph_initialized) {// Check if graph exists before adding points
                     send_to_client(client_fd, "Error: No graph exists. Create a graph first with 'Newgraph <n>'\n");
                     continue;
                 }
@@ -250,10 +254,8 @@ void *client_thread(int client_fd) {
             }
         }
         else if (command == "CH") {
-            // Wait for graph creation to complete if in progress
             {
-                lock_guard<std::mutex> creation_lock(graph_creation_mutex);
-                // This will block if graph is being created
+                lock_guard<std::mutex> creation_lock(graph_creation_mutex);// lock the creation mutex
             }
             
             // Now protect graph while computing hull
@@ -266,11 +268,19 @@ void *client_thread(int client_fd) {
             vector<Point> hull = grahamHull(points);// compute convex hull
             double area = polygonArea(hull);// compute area of the hull
 
+            // Print area status after every CH command
+            if (area >= 100.0) {
+                cout << "At Least 100 units belongs to CH (Current area: " << area << ")" << endl;
+            } else {
+                cout << "At Least 100 units no longer belongs to CH (Current area: " << area << ")" << endl;
+            }
+
             stringstream resp;// prepare response
             resp << "Convex Hull:\n";
 
             for (auto &p : hull) resp << "(" << p.x << ", " << p.y << ")\n";//loop through hull points and add to response
-            resp.setf(ios::fixed); resp.precision(3);
+            resp.setf(ios::fixed); // set fixed point notation
+            resp.precision(3);// set precision to 3 decimal places
             resp << "Area: " << area << "\n";
 
             string s = resp.str();// convert response to string
@@ -333,10 +343,10 @@ int main() {
     // wait for the proactor thread to finish
     pthread_join(proactorTid, nullptr);
 
-    pthread_mutex_destroy(&area_mutex);
-    pthread_cond_destroy(&area_condition);
+    pthread_mutex_destroy(&area_mutex);// destroy area mutex
+    pthread_cond_destroy(&area_condition);// destroy area condition variable
 
-    close(server_fd);
+    close(server_fd);// close server socket
 
     return 0;
 }

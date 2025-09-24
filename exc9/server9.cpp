@@ -84,7 +84,7 @@ void *client_thread(int client_fd) {
                     
                 } 
                 else {
-                    send_to_client(client_fd, "Point received. " + to_string(points_needed) + " more points needed.\n");
+                    send_to_client(client_fd, "Point received. " + to_string(points_needed) + " more points needed.\n");//to string is for int to string conversion
                 }
             } else {
                 send_to_client(client_fd, "Error: Invalid point format. Use: x y\n");
